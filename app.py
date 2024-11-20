@@ -1,168 +1,243 @@
 import json
-import os
+from typing import List, Dict
+from datetime   import datetime
 
 
 class Book:
-    def __init__(self, book_id, title, author, year, status="в наличии"):
-        self.book_id = book_id
+    """
+    Класс представляет книгу с уникальными свойствами.
+    """
+
+    def __init__(self, title: str, author: str, year: int):
+        self.id = None  # Уникальный идентификатор книги, назначается библиотекой.
         self.title = title
         self.author = author
         self.year = year
-        self.status = status
+        self.status = "в наличии"  # Статус книги по умолчанию.
 
-    def __repr__(self):
-        return f"ID: {self.book_id}, Title: {self.title}, Author: {self.author}, Year: {self.year}, Status: {self.status}"
+    def to_dict(self) -> Dict:
+        """
+        Преобразует объект книги в словарь.
+        """
+        return {
+            "id": self.id,
+            "title": self.title,
+            "author": self.author,
+            "year": self.year,
+            "status": self.status
+        }
+
+    @staticmethod
+    def validate_year(year: str) -> bool:
+        """
+        Проверяет, что год является числом и находится в диапазоне от 1000 до 2100.
+        """
+        if not year.isdigit():
+            return False  # Проверяем, состоит ли строка только из цифр
+        year_int = int(year)
+        return 1000 <= year_int <= datetime.now().year
+
+    @staticmethod
+    def validate_name(name: str) -> bool:
+        """
+        Проверяет, что имя или фамилия содержат только буквы и начинаются с заглавной.
+        """
+        return name.isalpha() and name.istitle()
 
 
 class Library:
-    def __init__(self):
-        self.books = []
+    """
+    Класс для управления библиотекой книг.
+    """
+
+    def __init__(self, data_file: str = "library.json", error_log: str = "error_log.json"):
+        self.books: List[Book] = []
+        self.data_file = data_file
+        self.error_log = error_log
         self.load_books()
-        self.load_errors()
 
     def load_books(self):
-        if os.path.exists("library.json"):
-            with open("library.json", "r", encoding="utf-8") as file:
-                self.books = [Book(**book) for book in json.load(file)]
+        """
+        Загружает книги из файла JSON. В случае ошибки записывает ее в error_log.
+        """
+        try:
+            with open(self.data_file, 'r', encoding='utf-8') as file:
+                data = json.load(file)
+                for book_data in data:
+                    book = Book(book_data["title"], book_data["author"], book_data["year"])
+                    book.id = book_data["id"]
+                    book.status = book_data["status"]
+                    self.books.append(book)
+        except FileNotFoundError:
+            self.books = []
+        except json.JSONDecodeError as e:
+            self.log_error(f"Ошибка загрузки JSON: {e}")
+            self.books = []
 
     def save_books(self):
-        with open("library.json", "w", encoding="utf-8") as file:
-            json.dump([book.__dict__ for book in self.books], file, ensure_ascii=False, indent=4)
+        """
+        Сохраняет книги в файл JSON. В случае ошибки записывает ее в error_log.
+        """
+        try:
+            with open(self.data_file, 'w', encoding='utf-8') as file:
+                json.dump([book.to_dict() for book in self.books], file, ensure_ascii=False, indent=4)
+        except Exception as e:
+            self.log_error(f"Ошибка сохранения JSON: {e}")
 
-    def load_errors(self):
-        if os.path.exists("error_log.json"):
-            with open("error_log.json", "r", encoding="utf-8") as file:
-                self.error_log = json.load(file)
-        else:
-            self.error_log = []
+    def log_error(self, error_message: str):
+        """
+        Логирует ошибку в файл error_log.
+        """
+        try:
+            with open(self.error_log, 'a', encoding='utf-8') as file:
+                json.dump({"error": error_message}, file, ensure_ascii=False, indent=4)
+        except Exception:
+            pass
 
-    def save_errors(self):
-        with open("error_log.json", "w", encoding="utf-8") as file:
-            json.dump(self.error_log, file, ensure_ascii=False, indent=4)
-
-    def add_book(self, title, author, year):
-        book_id = len(self.books) + 1
-        new_book = Book(book_id, title, author, year)
-        self.books.append(new_book)
+    def add_book(self, title: str, author: str, year: int):
+        """
+        Добавляет новую книгу в библиотеку.
+        """
+        book = Book(title, author, year)
+        book.id = self.generate_id()
+        self.books.append(book)
         self.save_books()
-        print(f"Книга '{title}' добавлена в библиотеку.")
 
-    def remove_book(self, book_id):
+    def generate_id(self) -> int:
+        """
+        Генерирует уникальный идентификатор для книги.
+        """
+        return max((book.id for book in self.books), default=0) + 1
+
+    def delete_book(self, book_id: int):
+        """
+        Удаляет книгу по ID.
+        """
         book = self.find_book_by_id(book_id)
         if book:
             self.books.remove(book)
             self.save_books()
-            print(f"Книга с ID {book_id} удалена.")
         else:
-            print("Ошибка: книга с таким ID не найдена.")
-            self.log_error(f"Книга с ID {book_id} не найдена для удаления.")
+            raise ValueError(f"Книга с ID {book_id} не найдена.")
 
-    def find_book_by_id(self, book_id):
+    def find_book_by_id(self, book_id: int) -> Book:
+        """
+        Ищет книгу по ID.
+        """
         for book in self.books:
-            if book.book_id == book_id:
+            if book.id == book_id:
                 return book
         return None
 
-    def search_books(self, search_term):
-        found_books = [book for book in self.books if search_term.lower() in book.title.lower() or search_term.lower() in book.author.lower() or search_term.lower() in str(book.year)]
-        return found_books
+    def search_books(self, query: str, field: str) -> List[Book]:
+        """
+        Ищет книги по заданному полю (title, author, year).
+        """
+        return [book for book in self.books if query.lower() in str(getattr(book, field)).lower()]
 
-    def display_books(self):
-        if not self.books:
-            print("Библиотека пуста.")
-        for book in self.books:
-            print(book)
-
-    def change_status(self, book_id, new_status):
+    def change_book_status(self, book_id: int, new_status: str):
+        """
+        Изменяет статус книги.
+        """
+        if new_status not in ["в наличии", "выдана"]:
+            raise ValueError("Неверный статус. Возможные значения: 'в наличии', 'выдана'.")
         book = self.find_book_by_id(book_id)
         if book:
-            if new_status not in ["в наличии", "выдана"]:
-                print("Ошибка: Статус может быть только 'в наличии' или 'выдана'.")
-                self.log_error(f"Неверный статус для книги с ID {book_id}.")
-                return
             book.status = new_status
             self.save_books()
-            print(f"Статус книги с ID {book_id} изменён на '{new_status}'.")
         else:
-            print("Ошибка: книга с таким ID не найдена.")
-            self.log_error(f"Книга с ID {book_id} не найдена для изменения статуса.")
+            raise ValueError(f"Книга с ID {book_id} не найдена.")
 
-    def log_error(self, error_message):
-        self.error_log.append(error_message)
-        self.save_errors()
-
-
-def is_valid_year(year):
-    return year.isdigit() and len(year) == 4
-
-
-def is_valid_name(name):
-    return name.isalpha() and len(name) > 1
+    def display_books(self) -> List[Dict]:
+        """
+        Возвращает список всех книг.
+        """
+        return [book.to_dict() for book in self.books]
 
 
 def main():
     library = Library()
-
     while True:
-        print("\nМеню:")
-        print("1. Добавить книгу")
-        print("2. Удалить книгу")
-        print("3. Поиск книги")
-        print("4. Отобразить все книги")
-        print("5. Изменить статус книги")
-        print("6. Выход")
+        print("\nМеню:"
+              "\n1. Добавить книгу"
+              "\n2. Удалить книгу"
+              "\n3. Найти книгу"
+              "\n4. Показать все книги"
+              "\n5. Изменить статус книги"
+              "\n0. Выход")
+        try:
+            choice = input("Выберите действие: ")
+            match choice:
+                case "1":
+                    # Добавление книги
+                    try:
+                        print(f'Введите "отмена" для возвращения в меню или')
+                        title = input("Введите название книги: ")
+                        if title.lower() == "отмена":
+                            continue
+                        author = input("Введите автора книги: ")
+                        year = input("Введите год издания книги: ")
+                        if not Book.validate_year(year):
+                            raise ValueError("Некорректный год.")
+                        library.add_book(title, author, int(year))
+                        print("Книга добавлена!")
+                    except ValueError as e:
+                        print(f"Ошибка: {e}")
+                case "2":
+                    # Удаление книги
+                    try:
+                        book_id = input("Введите ID книги для удаления (или 'назад' для возврата в меню): ").strip()
+                        if book_id.lower() == "назад":
+                            continue
+                        book_id = int(book_id)
+                        library.delete_book(book_id)
+                        print("Книга удалена.")
+                    except ValueError as e:
+                        print(f"Ошибка: {e}")
+                case "3":
+                    # Поиск книги
+                    field = input(
+                        "Искать по полю (title, author, year или 'назад' для возврата в меню): ").strip().lower()
+                    if field.lower() == "назад":
+                        continue
 
-        choice = input("Выберите действие: ")
+                    if field not in ["title", "author", "year"]:
+                        print("Ошибка: некорректное поле для поиска. Попробуйте снова.")
+                        continue
 
-        if choice == "1":
-            print("\nДобавить книгу:")
-            title = input("Введите название книги: ")
-            while True:
-                author = input("Введите имя автора (имя и фамилия): ")
-                if is_valid_name(author):
+                    query = input("Введите запрос (или 'назад' для возврата в меню): ").strip()
+                    if query.lower() == "назад":
+                        continue
+
+                    results = library.search_books(query=query, field=field)  # Указываем поле для поиска
+                    if not results:
+                        print("Книги по запросу не найдены.")
+                    else:
+                        for book in results:
+                            print(book.to_dict())
+                case "4":
+                    # Показать все книги
+                    for book in library.display_books():
+                        print(book)
+                case "5":
+                    # Изменение статуса книги
+                    try:
+                        book_id = input("Введите ID книги: ")
+                        if book_id.lower() == "назад":
+                            continue
+                        book_id = int(book_id)
+                        new_status = input("Введите новый статус (в наличии/выдана): ")
+                        library.change_book_status(book_id, new_status)
+                        print("Статус книги изменен.")
+                    except ValueError as e:
+                        print(f"Ошибка: {e}")
+                case "0":
+                    print("Выход из программы.")
                     break
-                print("Ошибка: имя автора должно состоять из букв.")
-            while True:
-                year = input("Введите год издания: ")
-                if is_valid_year(year):
-                    break
-                print("Ошибка: год должен быть числом и содержать 4 цифры.")
-            library.add_book(title, author, int(year))
-
-        elif choice == "2":
-            book_id = input("Введите ID книги для удаления: ")
-            if book_id.isdigit():
-                library.remove_book(int(book_id))
-            else:
-                print("Ошибка: введён некорректный ID.")
-
-        elif choice == "3":
-            search_term = input("Введите название, автора или год для поиска: ")
-            results = library.search_books(search_term)
-            if results:
-                print("\nРезультаты поиска:")
-                for book in results:
-                    print(book)
-            else:
-                print("Книги не найдены.")
-
-        elif choice == "4":
-            library.display_books()
-
-        elif choice == "5":
-            book_id = input("Введите ID книги для изменения статуса: ")
-            if book_id.isdigit():
-                new_status = input("Введите новый статус (в наличии/выдана): ")
-                library.change_status(int(book_id), new_status)
-            else:
-                print("Ошибка: введён некорректный ID.")
-
-        elif choice == "6":
-            print("Выход из программы...")
-            break
-
-        else:
-            print("Ошибка: неверный выбор. Попробуйте снова.")
+                case _:
+                    print("Неверный выбор. Попробуйте снова.")
+        except Exception as e:
+            print(f"Неожиданная ошибка: {e}")
 
 
 if __name__ == "__main__":
